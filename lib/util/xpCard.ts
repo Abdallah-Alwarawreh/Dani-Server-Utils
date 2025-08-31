@@ -1,7 +1,5 @@
 import { CanvasRenderingContext2D, createCanvas, loadImage } from "canvas";
 
-import { parse } from "twemoji-parser";
-
 export interface IGenerateXpCardProps {
   username: string;
   avatarURL: string;
@@ -9,7 +7,14 @@ export interface IGenerateXpCardProps {
   xp: number;
   xpNeeded: number;
   rank: number;
+  badges?: string[]; // Array of badge image URLs or identifiers
 }
+
+// Static configuration for badge layout
+const MAX_BADGES_PER_COLUMN = 4;
+const BADGE_SIZE = 80;
+const BADGE_SPACING = 10;
+const BADGE_COLUMN_WIDTH = BADGE_SIZE + BADGE_SPACING;
 
 const levelGradients: { minLevel: number; left: string; right: string }[] = [
   { minLevel: 50, left: "#7c9df8", right: "#1858fe" },
@@ -40,26 +45,54 @@ export async function generateXpCard({
   xp,
   xpNeeded,
   rank,
+  badges = [],
 }: IGenerateXpCardProps) {
+  username = username.replace(/(\p{Emoji_Presentation}|\p{Extended_Pictographic})/gu, ""); // remove all emojis from the username
+
+  const badgeColumns = Math.ceil(badges.length / MAX_BADGES_PER_COLUMN);
+  const badgeAreaWidth = badgeColumns > 0 ? badgeColumns * BADGE_COLUMN_WIDTH + 20 : 0;
+
   const padding = 20;
-  const width = 1200 + padding * 2;
-  const height = 300 + padding * 2;
-  const canvas = createCanvas(width, height);
+  const canvasWidth = 1200 + padding * 2;
+  const canvasHeight = 300 + padding * 2;
+
+  const maxInfoCardWidth = canvasWidth;
+  const infoCardWidth =
+    badgeColumns > 0 ? maxInfoCardWidth - badgeAreaWidth : maxInfoCardWidth;
+  const infoCardHeight = 300;
+
+  const canvas = createCanvas(canvasWidth, canvasHeight);
   const ctx = canvas.getContext("2d");
   const cornerRadius = 30;
 
-  ctx.fillStyle = "rgba(0, 0, 0, 0)";
-  ctx.fillRect(0, 0, width, height);
+  // #region Background
+  const background = await loadImage("img/xp_bg.png");
+  ctx.drawImage(background, 0, 0, canvasWidth, canvasHeight);
 
-  ctx.translate(padding, padding);
+  // #endregion
+
+  // #region Info Card
+  ctx.fillStyle = "rgba(0, 0, 0, 0)";
+  ctx.fillRect(0, 0, infoCardWidth, infoCardHeight);
+
+  ctx.translate(0, padding);
+
+  // Draw shadow for the info card
+  ctx.save();
+  ctx.shadowColor = "rgba(0, 0, 0, 0.5)";
+  ctx.shadowBlur = 8;
+  ctx.shadowOffsetX = 12;
+  ctx.shadowOffsetY = 6;
 
   ctx.fillStyle = "#121317";
-  drawRoundedRect(ctx, 0, 0, 1200, 300, cornerRadius);
+  drawRoundedRect(ctx, 0, 0, infoCardWidth, infoCardHeight, cornerRadius);
   ctx.fill();
+
+  ctx.restore(); // Remove shadow for subsequent drawings
 
   ctx.lineWidth = 6;
   const { left, right } = getGradientForLevel(level);
-  const borderGradient = ctx.createLinearGradient(0, 0, 1200, 300);
+  const borderGradient = ctx.createLinearGradient(0, 0, infoCardWidth, infoCardHeight);
   borderGradient.addColorStop(0, left);
   borderGradient.addColorStop(1, right);
 
@@ -68,12 +101,13 @@ export async function generateXpCard({
     ctx,
     ctx.lineWidth / 2,
     ctx.lineWidth / 2,
-    1200 - ctx.lineWidth,
-    300 - ctx.lineWidth,
-    cornerRadius,
+    infoCardWidth - ctx.lineWidth,
+    infoCardHeight - ctx.lineWidth,
+    cornerRadius - 5,
   );
   ctx.stroke();
 
+  // Avatar
   const avatar = await loadImage(avatarURL);
   const avatarX = 40;
   const avatarY = 25;
@@ -111,20 +145,23 @@ export async function generateXpCard({
   const usernameX = 325;
   const nameY = 100;
 
-  await drawTextWithEmojis(ctx, username, usernameX, nameY, 36);
+  const maxUsernameWidth = infoCardWidth - usernameX - 120;
+  const truncatedUsername = truncateTextWithEllipsis(ctx, username, maxUsernameWidth, 36);
+
+  drawText(ctx, truncatedUsername, usernameX, nameY, 36);
 
   // Role Icon
   const nearestRole = Math.floor(level / 5) * 5;
   if (nearestRole >= 5 && nearestRole <= 50) {
     try {
       const roleIcon = await loadImage(`img/role_${nearestRole}.png`);
-      const iconSize = 80;
-      const iconMargin = 25;
+      const iconSize = 64;
+      const iconMargin = 5;
 
       ctx.drawImage(
         roleIcon,
-        ctx.measureText(username).width + iconMargin + usernameX,
-        50,
+        ctx.measureText(truncatedUsername).width + iconMargin + usernameX,
+        55,
         iconSize,
         iconSize,
       );
@@ -136,19 +173,20 @@ export async function generateXpCard({
   // Level
   ctx.font = "bold 44px Liberation Sans";
   ctx.fillStyle = right;
-  ctx.fillText(`Level: ${level}`, usernameX + 2, nameY + 55);
+  const levelText = `Level: ${level}`;
+  ctx.fillText(levelText, usernameX + 2, nameY + 55);
 
   // Rank
-  ctx.font = "bold 52px Liberation Sans";
+  const levelTextWidth = ctx.measureText(levelText).width;
+  ctx.font = "bold 44px Liberation Sans";
   ctx.fillStyle = "#c3d4d0";
-  const rankText = `Rank #${rank}`;
-  const textMetrics = ctx.measureText(rankText);
-  ctx.fillText(rankText, width - textMetrics.width - 80, 80);
+  const rankText = ` | #${rank}`;
+  ctx.fillText(rankText, usernameX + 2 + levelTextWidth, nameY + 55);
 
   // XP bar
   const barX = 325;
   const barY = 180;
-  const barWidth = 600;
+  const barWidth = infoCardWidth / 2;
   const barHeight = 45;
   const progress = Math.max(0.02, Math.min(xp / xpNeeded, 1));
   ctx.fillStyle = "#23272A";
@@ -184,7 +222,10 @@ export async function generateXpCard({
   const textY = barY + barHeight / 2 + 8;
 
   ctx.fillText(xpText, textX, textY);
+  // #endregion
 
+  // #region Badges Side
+  // #endregion
   return canvas.toBuffer("image/png");
 }
 
@@ -209,7 +250,7 @@ function drawRoundedRect(
   ctx.closePath();
 }
 
-export async function drawTextWithEmojis(
+export function drawText(
   ctx: CanvasRenderingContext2D,
   text: string,
   x: number,
@@ -219,40 +260,45 @@ export async function drawTextWithEmojis(
 ) {
   ctx.font = `bold ${fontSize}px Liberation Sans`;
   ctx.textBaseline = "alphabetic";
+  ctx.fillStyle = color;
 
-  let cursorX = x;
+  ctx.fillText(text, x, y);
 
-  const parts = text.split(/(\p{Emoji_Presentation}|\p{Extended_Pictographic})/gu);
+  return x + ctx.measureText(text).width;
+}
 
-  for (const part of parts) {
-    if (!part) continue;
+export function truncateTextWithEllipsis(
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  maxWidth: number,
+  fontSize: number = 36,
+): string {
+  ctx.font = `bold ${fontSize}px Liberation Sans`;
 
-    const parsed = parse(part);
-    if (parsed.length > 0) {
-      // It's an emoji
-      const emoji = parsed[0];
-      const codepoint = Array.from(emoji.text)
-        .map((c) => c.codePointAt(0)!.toString(16))
-        .join("-");
-      const url = `https://twemoji.maxcdn.com/v/latest/72x72/${codepoint}.png`;
+  if (ctx.measureText(text).width <= maxWidth) {
+    return text;
+  }
 
-      try {
-        const img = await loadImage(url);
+  const ellipsis = "...";
+  const ellipsisWidth = ctx.measureText(ellipsis).width;
+  const availableWidth = maxWidth - ellipsisWidth;
 
-        const size = fontSize * 1.1;
-        const offsetY = y - fontSize * 0.85;
+  let left = 0;
+  let right = text.length;
+  let result = "";
 
-        ctx.drawImage(img, cursorX, offsetY, size, size);
-        cursorX += size;
-      } catch (err) {
-        console.warn("Failed to load emoji:", part, err);
-      }
+  while (left <= right) {
+    const mid = Math.floor((left + right) / 2);
+    const substring = text.substring(0, mid);
+    const width = ctx.measureText(substring).width;
+
+    if (width <= availableWidth) {
+      result = substring;
+      left = mid + 1;
     } else {
-      ctx.fillStyle = color;
-      ctx.fillText(part, cursorX, y);
-      cursorX += ctx.measureText(part).width;
+      right = mid - 1;
     }
   }
 
-  return cursorX;
+  return result + ellipsis;
 }
