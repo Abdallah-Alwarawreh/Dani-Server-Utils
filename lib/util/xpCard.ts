@@ -77,18 +77,14 @@ export async function generateXpCard({
 
   ctx.translate(0, padding);
 
-  // Draw shadow for the info card
-  ctx.save();
-  ctx.shadowColor = "rgba(0, 0, 0, 0.5)";
-  ctx.shadowBlur = 8;
-  ctx.shadowOffsetX = 12;
-  ctx.shadowOffsetY = 6;
+  // Draw shadow image for the info card
+  const shadowImage = await loadImage("img/shadow.png");
+  ctx.drawImage(shadowImage, infoCardWidth - 28, 0, 32, 300);
 
+  // Draw info card background
   ctx.fillStyle = "#121317";
   drawRoundedRect(ctx, 0, 0, infoCardWidth, infoCardHeight, cornerRadius);
   ctx.fill();
-
-  ctx.restore(); // Remove shadow for subsequent drawings
 
   ctx.lineWidth = 6;
   const { left, right } = getGradientForLevel(level);
