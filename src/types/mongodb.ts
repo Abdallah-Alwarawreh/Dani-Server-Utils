@@ -62,9 +62,14 @@ export interface RawSettings {
     roleId: string;
     level: number;
   }[];
+  vikunja?: {
+    forumChannelId: string | null;
+  }
 }
 
 export interface ISettings extends RawSettings, Document {}
+
+
 
 /* COUNTER */
 interface RawCounter {
